@@ -1,0 +1,144 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{geometry}
+\usepackage{enumitem}
+
+\geometry{margin=1in}
+\setlength{\parindent}{0pt}
+
+\title{CS 338 Fun Assignment \#5}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section*{Question 1.}
+Based on the given database scenario and concurrent transactions, 
+determine the appropriate isolation levels.
+
+Consider an online banking system with the following database schema:
+\begin{itemize}
+    \item Account(account\_id, customer\_id, balance, account\_type)
+    \item Transaction\_Log(log\_id, account\_id, transaction\_type, amount, timestamp)
+\end{itemize}
+
+
+For each of the following transaction scenarios, determine the 
+\textbf{lowest appropriate isolation level} and explain your reasoning:\\
+
+\textbf{(a)} Transaction T1 performs a single account balance update:
+\begin{verbatim}
+-- T1:
+UPDATE Account 
+SET balance = balance + 500 
+WHERE account_id = 12345;
+COMMIT;
+\end{verbatim}
+
+\textbf{(b)} Transaction T2 generates a monthly account statement:
+\begin{verbatim}
+-- T2:
+SELECT customer_id, balance, account_type 
+FROM Account 
+WHERE customer_id = 67890;
+
+SELECT log_id, transaction_type, amount, timestamp 
+FROM Transaction_Log 
+WHERE account_id IN (
+    SELECT account_id FROM Account WHERE customer_id = 67890
+);
+COMMIT;
+\end{verbatim}
+
+
+\textbf{(c)} Transaction T3 calculates and updates interest for all savings accounts:
+\begin{verbatim}
+-- T3:
+SELECT account_id, balance 
+FROM Account 
+WHERE account_type = 'SAVINGS';
+
+-- For each account found, calculate 2% interest
+UPDATE Account 
+SET balance = balance * 1.02 
+WHERE account_type = 'SAVINGS';
+
+-- Log the interest transactions
+INSERT INTO Transaction_Log 
+SELECT NEXTVAL('log_seq'), account_id, 'INTEREST', balance * 0.02, NOW()
+FROM Account 
+WHERE account_type = 'SAVINGS';
+COMMIT;
+\end{verbatim}
+
+\newpage
+\section*{Question 2.}
+
+Conceptual questions on concurrency anomalies and storage search method.\\
+
+\textbf{(a)} Explain the difference between an \textbf{unrepeatable read} 
+and a \textbf{phantom read}. \\
+
+\textbf{(b)} Suggest 1 \textbf{benefits} and 1 \textbf{potential problems} of maintaining 
+secondary indexes in a high‐update 
+OnLine Transaction Processing workload (systems that handle a large number of short, 
+fast transactions in real time, onine banking for example).\\
+
+\newpage
+\section*{Question 3.}
+Design and analyze a database system that handles both transaction isolation and 
+indexing requirements.
+
+You are designing a library management system with the following tables:
+\begin{itemize}
+    \item Book(isbn, title, author, category, copies\_available)
+    \item Member(member\_id, name, email, membership\_type)
+    \item Checkout(checkout\_id, member\_id, isbn, checkout\_date, due\_date, 
+    returned\_date)
+\end{itemize}
+
+\textbf{(a)} The system needs to handle the following concurrent transaction. 
+Determine the minimum isolation level required.\\
+
+A member checks out a book
+\begin{verbatim}
+-- T_CHECKOUT:
+SELECT copies_available FROM Book WHERE isbn = '978-0123456789';
+-- If copies_available > 0:
+UPDATE Book SET copies_available = copies_available - 1 
+WHERE isbn = '978-0123456789';
+INSERT INTO Checkout 
+VALUES (NEXTVAL('checkout_seq'), 12345, '978-0123456789', 
+        CURRENT_DATE, CURRENT_DATE + 14, NULL);
+COMMIT;
+\end{verbatim}
+
+Consider that multiple members might try to check out the last copy of the same book 
+simultaneously.\\
+
+
+\textbf{(b)} Consider the following two queries that are frequently executed on the 
+library management system:\\
+
+T1:
+\begin{verbatim}
+SELECT * FROM Book WHERE isbn = '978-0123456789';
+\end{verbatim}
+
+T2:
+\begin{verbatim}
+SELECT b.title, b.author, c.checkout_date, c.due_date
+FROM Book b, Checkout c
+WHERE b.isbn = c.isbn 
+  AND c.returned_date IS NULL
+  AND c.member_id = 12345;
+\end{verbatim}
+
+For each query, design an optimal indexing strategy.
+
+\end{document}

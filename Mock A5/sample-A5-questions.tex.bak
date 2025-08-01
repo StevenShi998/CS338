@@ -1,0 +1,167 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{geometry}
+\usepackage{enumitem}
+
+\geometry{margin=1in}
+\setlength{\parindent}{0pt}
+
+\title{CS 338 - Spring 2025\\Assignment \#5}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section*{Question 1.}
+Based on the given database scenario and concurrent transactions, determine the appropriate isolation levels.
+
+Consider an online banking system with the following database schema:
+\begin{itemize}
+    \item Account(account\_id, customer\_id, balance, account\_type)
+    \item Transaction\_Log(log\_id, account\_id, transaction\_type, amount, timestamp)
+\end{itemize}
+
+
+For each of the following transaction scenarios, determine the \textbf{lowest appropriate isolation level} and explain your reasoning:\\
+
+\textbf{(a)} Transaction T1 performs a single account balance update:
+\begin{verbatim}
+-- T1:
+UPDATE Account 
+SET balance = balance + 500 
+WHERE account_id = 12345;
+COMMIT;
+\end{verbatim}
+
+\textbf{(b)} Transaction T2 generates a monthly account statement:
+\begin{verbatim}
+-- T2:
+SELECT customer_id, balance, account_type 
+FROM Account 
+WHERE customer_id = 67890;
+
+SELECT log_id, transaction_type, amount, timestamp 
+FROM Transaction_Log 
+WHERE account_id IN (
+    SELECT account_id FROM Account WHERE customer_id = 67890
+);
+COMMIT;
+\end{verbatim}
+
+
+\textbf{(c)} Transaction T3 calculates and updates interest for all savings accounts:
+\begin{verbatim}
+-- T3:
+SELECT account_id, balance 
+FROM Account 
+WHERE account_type = 'SAVINGS';
+
+-- For each account found, calculate 2% interest
+UPDATE Account 
+SET balance = balance * 1.02 
+WHERE account_type = 'SAVINGS';
+
+-- Log the interest transactions
+INSERT INTO Transaction_Log 
+SELECT NEXTVAL('log_seq'), account_id, 'INTEREST', balance * 0.02, NOW()
+FROM Account 
+WHERE account_type = 'SAVINGS';
+COMMIT;
+\end{verbatim}
+
+\newpage
+\section*{Question 2.}
+
+Conceptual questions on concurrency anomalies and storage search method.\\
+
+\textbf{(a)} \textbf{[2 marks]} Explain the difference between an \textit{unrepeatable read} and a \textit{phantom read}. Give a concrete SQL example (schema and two concurrent transactions) where one anomaly can occur but the other cannot. State the minimum isolation level that prevents each anomaly.
+
+\textbf{Solution:} 
+An \textbf{unrepeatable read} occurs when Transaction~T1 reads the same row twice and obtains different values because another committed transaction modified that row between reads (e.g., READ COMMITTED allows this). 
+A \textbf{phantom read} occurs when T1 executes the same \texttt{SELECT} that retrieves a 
+\emph{set} of rows twice and finds that new rows have been inserted or existing rows deleted that match the query predicate (e.g., REPEATABLE READ allows this, SERIALIZABLE blocks it).
+
+\begin{itemize}
+    \item Unrepeatable‐read example: T1 reads balance from \texttt{Account} where \texttt{account\_id=1}. Concurrent T2 updates that balance and commits. T1 rereads and sees a different balance.
+    \item Phantom example: T1 selects all rows from \texttt{Order} where \texttt{amount>1000}. T2 inserts a new qualifying order and commits. T1 repeats the same query and sees an extra row.
+\end{itemize}
+Minimum isolation levels: REPEATABLE READ prevents unrepeatable reads; only SERIALIZABLE prevents phantoms.
+
+\textbf{(b)} \textbf{[2 marks]} Compare \textbf{binary search} on an ordered file with \textbf{index lookup} using a single‐level B\texttt{+}‐tree index for equality queries. List two similarities and two differences in terms of (i) access cost, (ii) insertion overhead, and (iii) space usage.
+
+\textbf{Solution:}
+Similarities: (1) Both achieve $\mathcal{O}(\log_b N)$ block reads for equality search, where $b$ is fan‐out/records‐per‐block; (2) Both rely on data being logically ordered by the search key.
+Differences: (1) Binary search requires that the \emph{data file itself} remain ordered—every insertion may require shifting or overflow blocks—whereas a B\texttt{+}‐tree keeps order only inside the index, leaving the data heap unordered; (2) The index approach introduces extra storage overhead for the index blocks but greatly reduces insertion cost because only index nodes are split, not the entire data file.
+
+\textbf{(c)} \textbf{[2 marks]} State two major \textbf{benefits} and two \textbf{potential problems} of maintaining secondary indexes in a high‐update OLTP workload.
+
+\textbf{Solution:}
+Benefits:
+\begin{itemize}[nosep]
+  \item Speeds up selective queries and foreign‐key joins without requiring full table scans.
+  \item Allows enforcement of constraints (e.g., UNIQUE) efficiently.
+\end{itemize}
+Problems:
+\begin{itemize}[nosep]
+  \item Every INSERT, UPDATE, or DELETE triggers index maintenance, adding write‐amplification and lock contention.
+  \item Extra storage footprint can increase I/O pressure and cache misses; if poorly chosen, unused indexes waste resources.
+\end{itemize}
+
+\textbf{(d)} \textbf{[2 marks]} A table has 1,000,000 rows randomly distributed across 10,000 blocks. Without building a secondary index, a DBA proposes to keep the file ordered by the primary key and rely solely on binary search. Describe one concurrency problem that could arise during bulk inserts and how an index‐oriented design would mitigate it.
+
+\textbf{Solution:} Keeping the data file physically ordered means a bulk insert of many new keys will either (i) force large‐scale page splits and pointer‐chain maintenance or (ii) lock the entire file while records are shifted to reclaim order, blocking concurrent readers and writers (\textit{hot spot}). A separate B\texttt{+}‐tree index allows the data pages to remain a heap; inserts only modify a small path in the index plus one data block, avoiding long‐held exclusive locks and reducing contention.
+\newpage
+\section*{Question 3.}
+Design and analyze a database system that handles both transaction isolation and indexing requirements.
+
+You are designing a library management system with the following tables:
+\begin{itemize}
+    \item Book(isbn, title, author, category, copies\_available)
+    \item Member(member\_id, name, email, membership\_type)
+    \item Checkout(checkout\_id, member\_id, isbn, checkout\_date, due\_date, returned\_date)
+\end{itemize}
+
+\textbf{(a)} The system needs to handle the following concurrent transaction. Determine the minimum isolation level required and explain your reasoning:
+
+\textbf{Transaction T\_CHECKOUT:} A member checks out a book
+\begin{verbatim}
+-- T_CHECKOUT:
+SELECT copies_available FROM Book WHERE isbn = '978-0123456789';
+-- If copies_available > 0:
+UPDATE Book SET copies_available = copies_available - 1 
+WHERE isbn = '978-0123456789';
+INSERT INTO Checkout 
+VALUES (NEXTVAL('checkout_seq'), 12345, '978-0123456789', 
+        CURRENT_DATE, CURRENT_DATE + 14, NULL);
+COMMIT;
+\end{verbatim}
+
+Consider that multiple members might try to check out the last copy of the same book simultaneously.\\
+
+
+\textbf{(b)} Design an indexing strategy for this library system. For each table, specify what indexes should be created and justify your choices based on expected query patterns:
+
+Expected queries:
+\begin{itemize}
+    \item Find books by ISBN (frequent)
+    \item Find books by author (frequent)  
+    \item Find books by category (moderate)
+    \item Find member information by member\_id (frequent)
+    \item Find all checkouts for a member (frequent)
+    \item Find all current checkouts (books not yet returned) (frequent)
+    \item Find overdue books (daily batch job)
+\end{itemize}
+
+\textbf{(c)} The library runs a nightly batch job to identify overdue books and send reminder emails. This job must run consistently even with concurrent checkout/return transactions. Design the batch transaction and specify:
+\begin{enumerate}
+    \item The appropriate isolation level
+    \item The complete SQL query
+    \item How to handle the scenario where books are returned while the batch job is running
+\end{enumerate}
+
+\end{document}

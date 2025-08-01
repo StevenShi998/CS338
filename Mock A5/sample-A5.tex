@@ -1,0 +1,299 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{geometry}
+\usepackage{enumitem}
+
+\geometry{margin=1in}
+
+\title{Mock Assignment \#5}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section*{Question 1.}
+Based on the given database scenario and concurrent transactions, determine the appropriate isolation levels.
+
+Consider an online banking system with the following database schema:
+\begin{itemize}
+    \item Account(account\_id, customer\_id, balance, account\_type)
+    \item Transaction\_Log(log\_id, account\_id, transaction\_type, amount, timestamp)
+\end{itemize}
+
+For each of the following transaction scenarios, determine the \textbf{lowest appropriate isolation level} and explain your reasoning:
+
+\textbf{(a)} Transaction T1 performs a single account balance update:
+\begin{verbatim}
+-- T1:
+UPDATE Account 
+SET balance = balance + 500 
+WHERE account_id = 12345;
+COMMIT;
+\end{verbatim}
+
+Consider other possible concurrent transactions that might read or modify account data.
+
+\textbf{Solution:}
+READ COMMITTED. Since T1 only performs a single write operation to the Account table, we need to prevent other transactions from reading dirty (uncommitted) data. READ COMMITTED ensures that:
+\begin{itemize}
+    \item No dirty reads occur (other transactions cannot see the balance update until T1 commits)
+    \item The transaction completes quickly, minimizing lock duration
+    \item No unrepeatable reads or phantom issues since T1 doesn't perform multiple reads
+\end{itemize}
+READ UNCOMMITTED cannot be used because it only supports read-only transactions, and T1 contains an UPDATE operation.
+
+\textbf{(b)} Transaction T2 generates a monthly account statement:
+\begin{verbatim}
+-- T2:
+SELECT customer_id, balance, account_type 
+FROM Account 
+WHERE customer_id = 67890;
+
+SELECT log_id, transaction_type, amount, timestamp 
+FROM Transaction_Log 
+WHERE account_id IN (
+    SELECT account_id FROM Account WHERE customer_id = 67890
+);
+COMMIT;
+\end{verbatim}
+
+\textbf{Solution:}
+REPEATABLE READ. Transaction T2 performs multiple read operations across two tables (Account and Transaction\_Log) that must be consistent with each other. The isolation level requirements are:
+\begin{itemize}
+    \item No dirty reads: Prevents reading uncommitted balance changes
+    \item No unrepeatable reads: Ensures account balances and types don't change between the two SELECT statements
+    \item Allows phantoms: New transaction log entries could appear, but this doesn't affect the consistency of the statement generation
+\end{itemize}
+READ COMMITTED would be insufficient because account balances could change between the two queries, leading to inconsistent statement data.
+
+\textbf{(c)} Transaction T3 calculates and updates interest for all savings accounts:
+\begin{verbatim}
+-- T3:
+SELECT account_id, balance 
+FROM Account 
+WHERE account_type = 'SAVINGS';
+
+-- For each account found, calculate 2% interest
+UPDATE Account 
+SET balance = balance * 1.02 
+WHERE account_type = 'SAVINGS';
+
+-- Log the interest transactions
+INSERT INTO Transaction_Log 
+SELECT NEXTVAL('log_seq'), account_id, 'INTEREST', balance * 0.02, NOW()
+FROM Account 
+WHERE account_type = 'SAVINGS';
+COMMIT;
+\end{verbatim}
+
+\textbf{Solution:}
+SERIALIZABLE. Transaction T3 requires the highest isolation level because:
+\begin{itemize}
+    \item It performs multiple operations (SELECT, UPDATE, INSERT) that must be consistent
+    \item The UPDATE affects multiple rows based on the initial SELECT results
+    \item New savings accounts could be added by concurrent transactions (phantom reads), which would lead to inconsistent interest calculations
+    \item The transaction must appear to execute in complete isolation to ensure all savings accounts are processed exactly once
+\end{itemize}
+Any lower isolation level could result in:
+\begin{itemize}
+    \item Missing newly created savings accounts (phantom problem)
+    \item Inconsistent balance calculations if accounts are modified concurrently
+    \item Incorrect transaction logging
+\end{itemize}
+
+
+\newpage
+\section*{Question 2.}
+Analyze the performance implications of different file organizations and indexing strategies.
+
+Consider a customer database with 1,000,000 customer records. Each record contains:
+Customer(customer\_id, name, email, city, registration\_date, status)
+
+\textbf{(a)} If customer records are stored in an unordered file, estimate the number of disk block accesses required for the following query in the worst case and average case:
+\begin{verbatim}
+SELECT * FROM Customer WHERE customer_id = 12345;
+\end{verbatim}
+
+Assume each disk block can hold 100 customer records.
+
+\textbf{Solution:}
+With 1,000,000 records and 100 records per block, there are 10,000 disk blocks total.
+
+For an unordered file with sequential search:
+\begin{itemize}
+    \item \textbf{Worst case:} 10,000 block accesses (record is in the last block or doesn't exist)
+    \item \textbf{Average case:} 5,000 block accesses (record is found halfway through the file on average)
+\end{itemize}
+
+\textbf{(b)} If the same records are stored in a file ordered by customer\_id, estimate the number of disk block accesses for the same query using binary search.
+
+\textbf{Solution:}
+For an ordered file with binary search:
+\begin{itemize}
+    \item Number of blocks to search: $\log_2(10,000) \approx 14$ block accesses
+    \item Both worst case and average case are approximately the same: 14 block accesses
+\end{itemize}
+
+This represents a significant improvement: from 5,000 average accesses to 14 accesses.
+
+\textbf{(c)} Suppose you create a single-level index on customer\_id. The index has one entry per customer record. If each index entry is 8 bytes (4 bytes for customer\_id + 4 bytes for record pointer) and each disk block can hold 500 index entries, calculate the number of disk block accesses required to find a customer record.
+
+\textbf{Solution:}
+Index calculation:
+\begin{itemize}
+    \item Total index entries: 1,000,000
+    \item Index entries per block: 500
+    \item Total index blocks: 1,000,000 ÷ 500 = 2,000 blocks
+\end{itemize}
+
+Binary search on index blocks: $\log_2(2,000) \approx 11$ block accesses
+
+Total access cost:
+\begin{itemize}
+    \item Index search: 11 block accesses
+    \item Data record access: 1 block access
+    \item \textbf{Total: 12 block accesses}
+\end{itemize}
+
+\textbf{(d)} Based on your calculations, rank the three approaches (unordered file, ordered file, indexed file) from best to worst performance for equality searches. Explain one advantage and one disadvantage of the indexed approach compared to the ordered file approach.
+
+\textbf{Solution:}
+\textbf{Performance ranking (best to worst):}
+1. Indexed file: 12 block accesses
+2. Ordered file: 14 block accesses  
+3. Unordered file: 5,000 block accesses (average)
+
+\textbf{Indexed approach vs. Ordered file:}
+\begin{itemize}
+    \item \textbf{Advantage:} Slightly better search performance (12 vs 14 accesses) and easier insertion/deletion operations (no need to maintain physical order)
+    \item \textbf{Disadvantage:} Additional storage overhead for the index (2,000 extra blocks) and increased complexity in maintaining the index during updates
+\end{itemize}
+
+
+\newpage
+\section*{Question 3.}
+Design and analyze a database system that handles both transaction isolation and indexing requirements.
+
+You are designing a library management system with the following tables:
+\begin{itemize}
+    \item Book(isbn, title, author, category, copies\_available)
+    \item Member(member\_id, name, email, membership\_type)
+    \item Checkout(checkout\_id, member\_id, isbn, checkout\_date, due\_date, returned\_date)
+\end{itemize}
+
+\textbf{(a)} The system needs to handle the following concurrent transaction. Determine the minimum isolation level required and explain your reasoning:
+
+\textbf{Transaction T\_CHECKOUT:} A member checks out a book
+\begin{verbatim}
+-- T_CHECKOUT:
+SELECT copies_available FROM Book WHERE isbn = '978-0123456789';
+-- If copies_available > 0:
+UPDATE Book SET copies_available = copies_available - 1 
+WHERE isbn = '978-0123456789';
+INSERT INTO Checkout 
+VALUES (NEXTVAL('checkout_seq'), 12345, '978-0123456789', 
+        CURRENT_DATE, CURRENT_DATE + 14, NULL);
+COMMIT;
+\end{verbatim}
+
+Consider that multiple members might try to check out the last copy of the same book simultaneously.
+
+\textbf{Solution:}
+\textbf{Minimum isolation level: SERIALIZABLE}
+
+Reasoning:
+\begin{itemize}
+    \item The transaction performs a \textbf{read-then-write} pattern that is susceptible to race conditions
+    \item If two members simultaneously try to check out the last copy, both might see \texttt{copies\_available = 1} in their SELECT statements
+    \item Without SERIALIZABLE isolation, both transactions could proceed to update and insert, resulting in \texttt{copies\_available = -1} (invalid state)
+    \item SERIALIZABLE ensures that concurrent executions appear as if they were run sequentially, preventing the lost update problem
+    \item Lower isolation levels would allow phantom reads or unrepeatable reads that could lead to data inconsistency in the book inventory
+\end{itemize}
+
+This is a classic example where business logic requires the highest isolation level to maintain data integrity.
+
+\textbf{(b)} Design an indexing strategy for this library system. For each table, specify what indexes should be created and justify your choices based on expected query patterns:
+
+Expected queries:
+\begin{itemize}
+    \item Find books by ISBN (frequent)
+    \item Find books by author (frequent)  
+    \item Find books by category (moderate)
+    \item Find member information by member\_id (frequent)
+    \item Find all checkouts for a member (frequent)
+    \item Find all current checkouts (books not yet returned) (frequent)
+    \item Find overdue books (daily batch job)
+\end{itemize}
+
+\textbf{Solution:}
+\textbf{Recommended indexes:}
+
+\textbf{Book table:}
+\begin{itemize}
+    \item \texttt{CREATE UNIQUE INDEX idx\_book\_isbn ON Book(isbn);} - Primary access pattern, ensures uniqueness
+    \item \texttt{CREATE INDEX idx\_book\_author ON Book(author);} - Frequent searches by author
+    \item \texttt{CREATE INDEX idx\_book\_category ON Book(category);} - Moderate frequency, supports browsing
+\end{itemize}
+
+\textbf{Member table:}
+\begin{itemize}
+    \item \texttt{CREATE UNIQUE INDEX idx\_member\_id ON Member(member\_id);} - Primary key access
+    \item \texttt{CREATE INDEX idx\_member\_email ON Member(email);} - Login functionality (assuming email-based login)
+\end{itemize}
+
+\textbf{Checkout table:}
+\begin{itemize}
+    \item \texttt{CREATE UNIQUE INDEX idx\_checkout\_id ON Checkout(checkout\_id);} - Primary key
+    \item \texttt{CREATE INDEX idx\_checkout\_member ON Checkout(member\_id);} - Find member's checkout history
+    \item \texttt{CREATE INDEX idx\_checkout\_isbn ON Checkout(isbn);} - Find checkout history for specific books
+    \item \texttt{CREATE INDEX idx\_checkout\_returned ON Checkout(returned\_date);} - Find current checkouts (WHERE returned\_date IS NULL)
+    \item \texttt{CREATE INDEX idx\_checkout\_due ON Checkout(due_date);} - Find overdue books efficiently
+\end{itemize}
+
+\textbf{(c)} The library runs a nightly batch job to identify overdue books and send reminder emails. This job must run consistently even with concurrent checkout/return transactions. Design the batch transaction and specify:
+\begin{enumerate}
+    \item The appropriate isolation level
+    \item The complete SQL query
+    \item How to handle the scenario where books are returned while the batch job is running
+\end{enumerate}
+
+\textbf{Solution:}
+\textbf{1. Isolation level: REPEATABLE READ}
+
+The batch job needs consistent data throughout its execution but can tolerate new checkouts (phantoms) that occur during processing. REPEATABLE READ prevents the overdue status from changing during the job execution.
+
+\textbf{2. Complete SQL query:}
+\begin{verbatim}
+-- Batch transaction for overdue books
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+
+SELECT c.checkout_id, c.member_id, b.title, b.author, 
+       m.name, m.email, c.checkout_date, c.due_date,
+       CURRENT_DATE - c.due_date as days_overdue
+FROM Checkout c
+JOIN Book b ON c.isbn = b.isbn  
+JOIN Member m ON c.member_id = m.member_id
+WHERE c.returned_date IS NULL 
+  AND c.due_date < CURRENT_DATE
+ORDER BY c.due_date ASC;
+
+COMMIT;
+\end{verbatim}
+
+\textbf{3. Handling concurrent returns:}
+\begin{itemize}
+    \item The REPEATABLE READ isolation level ensures that once the batch job starts, the set of overdue books remains consistent throughout the transaction
+    \item Books returned after the batch job starts will still appear as overdue in this run, but will be excluded from the next day's batch
+    \item This is acceptable behavior - it's better to send one extra reminder than to miss overdue books
+    \item The \texttt{returned\_date IS NULL} condition, combined with REPEATABLE READ, ensures consistent results
+    \item Alternative: Use a timestamp-based approach where the batch job processes books overdue as of a specific point in time
+\end{itemize}
+
+
+\newpage
+\end{document}
